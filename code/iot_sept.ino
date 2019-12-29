@@ -1,34 +1,12 @@
-
 #include <ArduinoJson.h>
 #include <Arduino.h>
 #include <Stream.h>
+
 #include <ESP8266WiFi.h>
 #include <ESP8266WiFiMulti.h>
 
-/*
-int pin_Out_S0 = 12;
-int pin_Out_S1 = 13;
-int pin_Out_S2 = 14;
-int pin_In_Mux1 = A0;
-int Mux1_State[8] = {0};
-*/
-
-struct clientData {
-  int Temp[8];
-
-};
-
-int a = 0;
-
-int   valget1;
-
-
-
-
-
-
 //AWS
-#include "sha256.h"
+#include <sha256.h>
 #include "Utils.h"
 
 //WEBSockets
@@ -41,13 +19,27 @@ int   valget1;
 #include <Countdown.h>
 #include <MQTTClient.h>
 
+
+
 //AWS MQTT Websocket
 #include "Client.h"
 #include "AWSWebSocketClient.h"
 #include "CircularByteBuffer.h"
 
-//  --------- Config ---------- //
-//AWS IOT config, change these:
+struct clientData {
+  int latitude[8];
+  char  longitude[8];
+  char pressure[8];
+  char tempmi[8];
+  char tempmax[8];
+};
+
+
+int conv;
+
+
+
+
 char wifi_ssid[]       = "Psitron";
 char wifi_password[]   = "Psitron@12";
 char aws_endpoint[]    = "afe4foq5ne6fo-ats.iot.ap-southeast-1.amazonaws.com";
@@ -57,23 +49,16 @@ char aws_region[]      = "ap-southeast-1";
 const char* aws_topic  = "$aws/things/Dec_Water/shadow/update";
 int port = 443;
 
-// If stuff isn't working right, watch the console:
-#define DEBUG_PRINT 1
-
-
 
 //MQTT config
 const int maxMQTTpackageSize = 512;
 const int maxMQTTMessageHandlers = 1;
-// ---------- /Config ----------//
 
-//DHT dht(DHTPIN, DHTTYPE);
 ESP8266WiFiMulti WiFiMulti;
 
-AWSWebSocketClient awsWSclient(256,5000);
+AWSWebSocketClient awsWSclient(1000);
 
 IPStack ipstack(awsWSclient);
-
 MQTT::Client<IPStack, Countdown, maxMQTTpackageSize, maxMQTTMessageHandlers> *client = NULL;
 
 //# of connections
@@ -95,22 +80,20 @@ void messageArrived(MQTT::MessageData& md)
 {
   MQTT::Message &message = md.message;
 
-  if (DEBUG_PRINT) {
-    Serial.print("Message ");
-    Serial.print(++arrivedcount);
-    Serial.print(" arrived: qos ");
-    Serial.print(message.qos);
-    Serial.print(", retained ");
-    Serial.print(message.retained);
-    Serial.print(", dup ");
-    Serial.print(message.dup);
-    Serial.print(", packetid ");
-    Serial.println(message.id);
-    Serial.print("Payload ");
-    char* msg = new char[message.payloadlen+1]();
-    memcpy (msg,message.payload,message.payloadlen);
-    Serial.println(msg);
-
+  Serial.print("Message ");
+  Serial.print(++arrivedcount);
+  Serial.print(" arrived: qos ");
+  Serial.print(message.qos);
+  Serial.print(", retained ");
+  Serial.print(message.retained);
+  Serial.print(", dup ");
+  Serial.print(message.dup);
+  Serial.print(", packetid ");
+  Serial.println(message.id);
+  Serial.print("Payload ");
+  char* msg = new char[message.payloadlen+1]();
+  memcpy (msg,message.payload,message.payloadlen);
+  Serial.println(msg);
 
 
 //--------------------------------------------------------------------------
@@ -136,33 +119,31 @@ void messageArrived(MQTT::MessageData& md)
 //  Serial.println(sensorType);
 // Serial.println(value);
 
-  const char* Temp = parsed["state"]["reported"]["test_value1"];
-
+  const char *latitude = parsed["state"]["reported"]["test_value1"];
+ // const char* longitude = parsed["state"]["reported"]["test_value2"];  
+ // const char* pressure = parsed["state"]["reported"]["test_value3"];  
+  //const char* tempmi = parsed["state"]["reported"]["test_value4"]; 
+  //const char* tempmax = parsed["state"]["reported"]["test_value5"]; 
       
-  int convTemp=atoi(Temp);
+  int conv=atoi(latitude);
+  Serial.print("The concertvalue is ");
+Serial.println(conv);
 
-  Serial.print("The Temperature is ");
-  Serial.println(convTemp);
 
- 
-
+   Serial.println(conv);
 
   //-------------------------------------------------------------------------
-  if(convTemp>290)
+  if(conv==290)
   {
-    digitalWrite(16,HIGH);
+    digitalWrite(5,HIGH);
     
     }
-    else if(convTemp==200)
+    else if(conv==200)
     {
-      digitalWrite(16,LOW);
+      digitalWrite(5,LOW);
       
       }
-
-
-    
-    delete msg;
-  }
+  delete msg;
 }
 
 //connects to websocket layer and mqtt layer
@@ -182,84 +163,85 @@ bool connect () {
 
     //delay is not necessary... it just help us to get a "trustful" heap space value
     delay (1000);
-    if (DEBUG_PRINT) {
-      Serial.print (millis ());
-      Serial.print (" - conn: ");
-      Serial.print (++connection);
-      Serial.print (" - (");
-      Serial.print (ESP.getFreeHeap ());
-      Serial.println (")");
-    }
+    Serial.print (millis ());
+    Serial.print (" - conn: ");
+    Serial.print (++connection);
+    Serial.print (" - (");
+    Serial.print (ESP.getFreeHeap ());
+    Serial.println (")");
+
+
+
 
    int rc = ipstack.connect(aws_endpoint, port);
     if (rc != 1)
     {
-      if (DEBUG_PRINT) {
-        Serial.println("error connection to the websocket server");
-      }
+      Serial.println("error connection to the websocket server");
       return false;
     } else {
-      if (DEBUG_PRINT) {
-        Serial.println("websocket layer connected");
-      }
+      Serial.println("websocket layer connected");
     }
-    
-    if (DEBUG_PRINT) {
-      Serial.println("MQTT connecting");
-    }
-    
+
+
+    Serial.println("MQTT connecting");
     MQTTPacket_connectData data = MQTTPacket_connectData_initializer;
     data.MQTTVersion = 3;
-    char* clientID = generateClientID ();
+    char* clientID =generateClientID ();
     data.clientID.cstring = clientID;
     rc = client->connect(data);
-    delete[] clientID;
+    //delete[] clientID;
     if (rc != 0)
     {
-      if (DEBUG_PRINT) {
-        Serial.print("error connection to MQTT server");
-        Serial.println(rc);
-        return false;
-      }
+      Serial.print("error connection to MQTT server");
+      Serial.println(rc);
+      return false;
     }
-    if (DEBUG_PRINT) {
-      Serial.println("MQTT connected");
-    }
+    Serial.println("MQTT connected");
     return true;
 }
 
-
 //subscribe to a mqtt topic
 void subscribe () {
-   //subscrip to a topic
+   //subscript to a topic
     int rc = client->subscribe(aws_topic, MQTT::QOS0, messageArrived);
     if (rc != 0) {
-      if (DEBUG_PRINT) {
-        Serial.print("rc from MQTT subscribe is ");
-        Serial.println(rc);
-      }
+      Serial.print("rc from MQTT subscribe is ");
+      Serial.println(rc);
       return;
     }
-    if (DEBUG_PRINT) {
-      Serial.println("MQTT subscribed");
-    }
+    Serial.println("MQTT subscribed");
+    
+    
+}
+
+//send a message to a mqtt topic
+void sendmessage () {
+    //send a message
+    MQTT::Message message;
+    char buf[100];
+    strcpy(buf, "{\"state\":{\"reported\":{\"test_value1\":299,\"test_value2\":292}}}");
+    message.qos = MQTT::QOS0;
+    message.retained = false;
+    message.dup = false;
+    message.payload = (void*)buf;
+    message.payloadlen = strlen(buf)+1;
+    int rc = client->publish(aws_topic, message); 
 }
 
 
 void setup() {
-    Serial.begin (115200);   
-    pinMode(16,OUTPUT);
+    Serial.begin (115200);
+    delay (2000);
+    Serial.setDebugOutput(1);
+    pinMode(5,OUTPUT);
+    //fill with ssid and wifi password
     WiFiMulti.addAP(wifi_ssid, wifi_password);
-    
+    Serial.println ("connecting to wifi");
     while(WiFiMulti.run() != WL_CONNECTED) {
         delay(100);
-        if (DEBUG_PRINT) {
-          Serial.print (". ");
-        }
+        Serial.print (".");
     }
-    if (DEBUG_PRINT) {
-      Serial.println ("\nconnected to network " + String(wifi_ssid) + "\n");
-    }
+    Serial.println ("\nconnected");
 
     //fill AWS parameters    
     awsWSclient.setAWSRegion(aws_region);
@@ -267,56 +249,27 @@ void setup() {
     awsWSclient.setAWSKeyID(aws_key);
     awsWSclient.setAWSSecretKey(aws_secret);
     awsWSclient.setUseSSL(true);
+    configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
 
+    if (connect ()){
+      subscribe ();
+      sendmessage ();
+    }
 
 }
 
-
 void loop() {
 
- 
-
-/*
-  int valuee= analogRead(A0);
-  if(valuee >=1000)
-  {
-     a=3500;
-    }
-    else
-    {
-     a=0;
-      }
-
-  String aa = String(a);    // Read temperature as Fahrenheit (isFahrenheit = true)
-  */
-
-
-  String values = "{\"state\":{\"reported\":{\"test_value1\":200,\"test_value2\":100}}}";
-  // http://stackoverflow.com/questions/31614364/arduino-joining-string-and-char
-  const char *publish_message = values.c_str();
-
+messageArrived;
+  
   //keep the mqtt up and running
   if (awsWSclient.connected ()) {    
-    
       client->yield();
-      
-    //  subscribe (); 
-      //publish 
-      MQTT::Message message;
-      char buf[1000];
-      strcpy(buf, publish_message);
-      message.qos = MQTT::QOS0;
-      message.retained = false;
-      message.dup = false;
-      message.payload = (void*)buf;
-      message.payloadlen = strlen(buf)+1;
-      int rc = client->publish(aws_topic, message);  
   } else {
     //handle reconnection
-    connect ();
+    if (connect ()){
+      subscribe ();      
+    }
   }
 
-
- 
-  
 }
